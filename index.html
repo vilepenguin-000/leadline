@@ -3,6 +3,14 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.11.0 Multiple pitch email templates: manage named templates in Settings (add / rename /
+          delete), template picker in the pitch modal. Ships with 3: Cold pitch, Spec site
+          intro, Spec site follow-up. New {speclink} placeholder + per-lead "Spec site URL"
+          field (lead form, drawer button, CSV import/export). One-click compose kept when
+          only one template exists. Old single template auto-migrates to "Cold pitch".
+  v1.10.0 Google review enrichment: review_count / google_rating import (auto-mapped from
+          enrich_reviews.py output), shown in leads table, call queue & drawer; queue now
+          sorts tier -> most reviews -> worst score ("most money, most need").
   v1.9.0  Calling-window timer in topbar (counts down 10:00–16:00, amber while live).
   v1.8.0  Version tracking added: version shown in sidebar & Settings, stamped into backups.
   v1.7.0  Companies section removed (leads carry their own company name).
@@ -415,6 +423,7 @@
     <div class="fg"><label>Site score</label><input id="f-score" type="number" min="0" max="100"></div>
     <div class="fg"><label>Lead tier</label><select id="f-tier"><option value="">—</option><option>HOT</option><option>WARM</option><option>COLD</option><option>DEAD_SITE</option><option>NO_WEBSITE</option><option>MANUAL_REVIEW</option></select></div>
     <div class="fg"><label>Follow-up date</label><input id="f-followup" type="date"></div>
+    <div class="fg"><label>Spec site URL</label><input id="f-specurl" placeholder="https://demo.codefrog.ca/…"></div>
     <div class="fg span2"><label>Lead signals (separate with ;)</label><input id="f-signals"></div>
   </div></div>
   <div class="modal-foot"><button class="btn" onclick="closeModal('m-lead')">Cancel</button><button class="btn btn-amber" onclick="saveLead()">Save lead</button></div>
@@ -468,6 +477,7 @@
 <div class="overlay" id="m-pitch"><div class="modal">
   <div class="modal-head"><span id="pitch-title">Pitch email</span><button class="x" onclick="closeModal('m-pitch')">×</button></div>
   <div class="modal-body">
+    <div class="fg" style="margin-bottom:10px"><label>Template</label><select id="pitch-tpl" onchange="pitchSwitchTpl(this.value)"></select></div>
     <div class="fg" style="margin-bottom:10px"><label>To</label><input id="pitch-to" placeholder="No email on file — copy the text and send it from anywhere"></div>
     <div class="fg" style="margin-bottom:10px"><label>Subject</label><input id="pitch-subj"></div>
     <div class="fg"><label>Body — edit before sending</label><textarea id="pitch-body" style="min-height:210px;font-size:12.5px"></textarea></div>
@@ -491,9 +501,16 @@
         <option value="mailto">System mail app (mailto)</option>
       </select>
     </div>
-    <div class="fg" style="margin-bottom:12px"><label>Pitch email subject template</label><input id="set-subj"></div>
-    <div class="fg" style="margin-bottom:6px"><label>Pitch email body template</label><textarea id="set-body" style="min-height:150px;font-family:var(--mono);font-size:12px"></textarea></div>
-    <div style="font-size:11.5px;color:var(--mut);margin-bottom:16px">Placeholders: {customer} (contact name, or company if none) {company} {contact} {website} {score} {signals} — signals become a bulleted list of the site\u2019s issues.</div>
+    <div class="d-sec" style="margin-top:0">Pitch email templates</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+      <select id="set-tpl" style="flex:1" onchange="setTplSwitch(this.value)"></select>
+      <button class="btn btn-sm" onclick="setTplAdd()">＋ New</button>
+      <button class="btn btn-sm btn-danger" id="set-tpl-del" onclick="setTplDelete()">Delete</button>
+    </div>
+    <div class="fg" style="margin-bottom:10px"><label>Template name</label><input id="set-tpl-name" oninput="setTplStash()"></div>
+    <div class="fg" style="margin-bottom:10px"><label>Subject</label><input id="set-subj" oninput="setTplStash()"></div>
+    <div class="fg" style="margin-bottom:6px"><label>Body</label><textarea id="set-body" style="min-height:150px;font-family:var(--mono);font-size:12px" oninput="setTplStash()"></textarea></div>
+    <div style="font-size:11.5px;color:var(--mut);margin-bottom:16px">Placeholders: {customer} (contact name, or company if none) {company} {contact} {website} {score} {signals} {speclink} — signals become a bulleted list of the site&rsquo;s issues; speclink is the lead&rsquo;s Spec site URL.</div>
     <div class="d-sec" style="margin-top:0">Backup</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="backupJSON()">⬇ Download backup (JSON)</button>
@@ -510,22 +527,45 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.9.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.11.0';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
 let storageOK = true;
+function defaultTemplates() {
+  return [
+    { id: 'tpl-cold', name: 'Cold pitch (site audit)',
+      subj: 'Quick note about the {company} website',
+      body: 'Hi {contact},\n\nI was looking at {website} and noticed a few things that are likely costing you work:\n\n{signals}\n\nI build websites for contractors and could fix all of this in about two weeks. Worth a quick call?\n\nThanks,\n' },
+    { id: 'tpl-spec', name: 'Spec site — it\u2019s already built',
+      subj: 'I already built {company} a new website',
+      body: 'Hi {customer},\n\nI\u2019ll keep this short. I build websites for contractors, and instead of sending you a pitch, I went ahead and built one for {company}. It\u2019s live right now:\n\n{speclink}\n\nNo catch and no obligation \u2014 I built it on my own time. If you like it, it\u2019s yours: I\u2019ll connect it to your own domain and you\u2019re live within days. If not, I take it down and you\u2019ll never hear from me again.\n\nWorth 30 seconds to compare it against your current site?\n\nThanks,\n' },
+    { id: 'tpl-spec-fu', name: 'Spec site — follow-up',
+      subj: 'That website I built for {company} \u2014 coming down soon',
+      body: 'Hi {customer},\n\nLast week I sent over the website I built for {company} on my own time:\n\n{speclink}\n\nQuick heads-up \u2014 I only keep spec sites live for a couple of weeks, so this one comes down at the end of next week. If you want it, just reply or give me a call and it\u2019s yours, on your own domain, within a few days. If not, no hard feelings \u2014 I\u2019ll take it down and that\u2019s the end of it.\n\nThanks,\n' },
+  ];
+}
+function migrateTemplates() {
+  /* v1.11.0: old single emailSubj/emailBody -> named templates array (keeps custom wording as "Cold pitch") */
+  if (!Array.isArray(db.settings.templates) || !db.settings.templates.length) db.settings.templates = defaultTemplates();
+  if (db.settings.emailSubj || db.settings.emailBody) {
+    const cold = db.settings.templates.find(t => t.id === 'tpl-cold') || db.settings.templates[0];
+    if (db.settings.emailSubj) cold.subj = db.settings.emailSubj;
+    if (db.settings.emailBody) cold.body = db.settings.emailBody;
+    delete db.settings.emailSubj; delete db.settings.emailBody;
+  }
+}
 let db = { leads: [], deals: [], activities: [], log: [], stats: {}, settings: {
   highContrast: true,
   mailHandler: 'gmail',
-  emailSubj: 'Quick note about the {company} website',
-  emailBody: 'Hi {contact},\n\nI was looking at {website} and noticed a few things that are likely costing you work:\n\n{signals}\n\nI build websites for contractors and could fix all of this in about two weeks. Worth a quick call?\n\nThanks,\n',
+  templates: defaultTemplates(),
 }};
 
 function loadDB() {
   try {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) { const d = JSON.parse(raw); const defaults = Object.assign({}, db.settings); db = Object.assign(db, d); db.settings = Object.assign(defaults, d.settings || {}); }
+    migrateTemplates();
   } catch (e) { storageOK = false; }
 }
 function saveDB() {
@@ -737,7 +777,7 @@ function renderLeads() {
         <td><span class="badge b-${l.status}">${l.status}</span></td>
         <td class="mono">${esc(l.phone) || '—'}</td>
         <td>${esc(l.city) || '—'}</td>
-        <td><span class="mono" style="font-weight:700;color:${scol}">${sc ?? '—'}</span> ${tierBadge(l)}</td>
+        <td><span class="mono" style="font-weight:700;color:${scol}">${sc ?? '—'}</span> ${tierBadge(l)}${l.reviewCount ? `<div class="sub">★ ${l.googleRating || '–'} · ${l.reviewCount} reviews</div>` : ''}</td>
         <td><div style="font-size:11px;color:var(--mut)">${csLabel(l.callStatus).replace(/^\S+ /, '') || '—'}</div>${l.followUp ? `<div class="sub mono ${overdue ? 'overdue' : ''}">↳ ${l.followUp}</div>` : ''}</td>
       </tr>`;
     }).join('');
@@ -793,6 +833,7 @@ function openDrawer(id) {
       <span class="badge b-${l.status}">${l.status}</span>${tierBadge(l)}
       ${l.phone ? `<a class="btn btn-sm" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>` : ''}
       ${webHref ? `<a class="btn btn-sm" href="${esc(webHref)}" target="_blank" rel="noopener">🌐 Site</a>` : ''}
+      ${l.specUrl ? `<a class="btn btn-sm" href="${esc(/^https?:\/\//i.test(l.specUrl) ? l.specUrl : 'https://' + l.specUrl)}" target="_blank" rel="noopener">🐸 Spec site</a>` : ''}
       <button class="btn btn-sm" onclick="googleLead('${l.id}')">🔍 Google</button>
       <button class="btn btn-sm btn-amber" onclick="openPitch('${l.id}')">✉️ Pitch email</button>
     </div>
@@ -810,6 +851,7 @@ function openDrawer(id) {
     <div class="d-sec">Website audit</div>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
       ${sc ? `<div style="font:700 30px var(--disp);color:${scol}">${sc}<span style="font:600 12px var(--mono);color:var(--mut)">/100</span></div>` : ''}
+      ${l.reviewCount ? `<div style="font:700 30px var(--disp);color:var(--mint)">${l.reviewCount}<span style="font:600 12px var(--mono);color:var(--mut)"> reviews${l.googleRating ? ' · ★ ' + l.googleRating : ''}</span></div>` : ''}
       ${signals.length ? `<button class="btn btn-sm" style="margin-left:auto" onclick="copyPitch('${l.id}')">📋 Copy pitch points</button>` : ''}
     </div>
     ${signals.map(s => `<div class="sig-line">⚠ ${esc(s)}</div>`).join('')}
@@ -913,8 +955,9 @@ function fillTemplate(tpl, l) {
     '{customer}': l.contact || l.company || 'there',
     '{website}': l.website || 'your website', '{score}': String(l.siteScore || ''),
     '{signals}': sig || '• (no audit data on file)',
+    '{speclink}': l.specUrl || '[PASTE SPEC SITE LINK — no Spec site URL on this lead]',
   };
-  return String(tpl || '').replace(/\{company\}|\{contact\}|\{customer\}|\{website\}|\{score\}|\{signals\}/g, m => vals[m]);
+  return String(tpl || '').replace(/\{company\}|\{contact\}|\{customer\}|\{website\}|\{score\}|\{signals\}|\{speclink\}/g, m => vals[m]);
 }
 function composeURL(to, subj, body) {
   const handler = db.settings.mailHandler || 'gmail';
@@ -923,10 +966,14 @@ function composeURL(to, subj, body) {
   if (handler === 'outlook') return 'https://outlook.live.com/mail/0/deeplink/compose?to=' + enc(to) + '&subject=' + enc(subj) + '&body=' + enc(body);
   return 'https://mail.google.com/mail/?view=cm&fs=1&to=' + enc(to) + '&su=' + enc(subj) + '&body=' + enc(body);
 }
+function templates() { return db.settings.templates || []; }
 function openPitch(id) {
   const l = db.leads.find(x => x.id === id); if (!l) return;
-  const subj = fillTemplate(db.settings.emailSubj, l);
-  let body = fillTemplate(db.settings.emailBody, l);
+  /* 2+ templates: open the modal so you can pick one. Exactly 1: keep the v1.6 one-click compose. */
+  if (templates().length !== 1) { pitchEdit(id); return; }
+  const t = templates()[0];
+  const subj = fillTemplate(t.subj, l);
+  let body = fillTemplate(t.body, l);
   let url = composeURL(l.email || '', subj, body);
   const limit = (db.settings.mailHandler === 'mailto') ? 1800 : 7500;
   if (url.length > limit) {
@@ -939,14 +986,22 @@ function openPitch(id) {
   if (!win) { pitchEdit(id); toast('Pop-up blocked — review and copy the email here instead.'); return; }
   addLog('Pitch email composed for ' + esc(l.company));
 }
-function pitchEdit(id) {
+let pitchLeadId = null;
+function pitchEdit(id, tplId) {
   const l = db.leads.find(x => x.id === id); if (!l) return;
+  pitchLeadId = id;
+  const tpls = templates();
+  const t = tpls.find(x => x.id === tplId) || tpls[0] || { subj: '', body: '' };
+  const sel = document.getElementById('pitch-tpl');
+  sel.innerHTML = tpls.map(x => `<option value="${esc(x.id)}" ${x.id === t.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  sel.parentElement.style.display = tpls.length > 1 ? '' : 'none';
   document.getElementById('pitch-title').textContent = 'Pitch email — ' + (l.company || 'lead');
   document.getElementById('pitch-to').value = l.email || '';
-  document.getElementById('pitch-subj').value = fillTemplate(db.settings.emailSubj, l);
-  document.getElementById('pitch-body').value = fillTemplate(db.settings.emailBody, l);
+  document.getElementById('pitch-subj').value = fillTemplate(t.subj, l);
+  document.getElementById('pitch-body').value = fillTemplate(t.body, l);
   openModal('m-pitch');
 }
+function pitchSwitchTpl(tplId) { if (pitchLeadId) pitchEdit(pitchLeadId, tplId); }
 function pitchCopy(which) {
   const subj = document.getElementById('pitch-subj').value;
   const body = document.getElementById('pitch-body').value;
@@ -958,6 +1013,8 @@ function pitchSend() {
     document.getElementById('pitch-subj').value, document.getElementById('pitch-body').value);
   if (db.settings.mailHandler === 'mailto') { const a = document.createElement('a'); a.href = url; a.click(); }
   else window.open(url, '_blank', 'noopener');
+  const l = pitchLeadId && db.leads.find(x => x.id === pitchLeadId);
+  if (l) addLog('Pitch email composed for ' + esc(l.company));
 }
 function setMailHandler(v) { db.settings.mailHandler = v; saveDB(); }
 /* kept for backward compatibility */
@@ -974,7 +1031,7 @@ function buildQueue() {
     if (mode === 'warm') return t === 'WARM' && !l.callStatus;
     return !l.callStatus;
   }).filter(l => l.phone);
-  queue.sort((a, b) => tierRank(a) - tierRank(b) || (a.siteScore || 0) - (b.siteScore || 0));
+  queue.sort((a, b) => tierRank(a) - tierRank(b) || (b.reviewCount || 0) - (a.reviewCount || 0) || (a.siteScore || 0) - (b.siteScore || 0));
   queueIdx = Math.min(queueIdx, Math.max(0, queue.length - 1));
 }
 function renderQueue() {
@@ -996,6 +1053,7 @@ function renderQueue() {
     <a class="q-phone" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>
     <div style="display:flex;gap:18px;align-items:flex-start">
       ${sc ? `<div><div class="q-score" style="color:${scol}">${sc}</div><div style="font:600 10px var(--mono);color:var(--mut)">SITE SCORE</div></div>` : ''}
+      ${l.reviewCount ? `<div><div class="q-score" style="color:var(--mint)">${l.reviewCount}</div><div style="font:600 10px var(--mono);color:var(--mut)">REVIEWS${l.googleRating ? ' · ★ ' + l.googleRating : ''}</div></div>` : ''}
       <div style="flex:1">${signals.slice(0, 5).map(s => `<div class="sig-line">⚠ ${esc(s)}</div>`).join('') || '<div style="color:var(--mut);font-size:12.5px">No audit signals on file.</div>'}</div>
     </div>
     <div class="q-actions">
@@ -1031,7 +1089,7 @@ function openLeadModal(id) {
   set('f-company', l.company); set('f-contact', l.contact); set('f-email', l.email); set('f-phone', l.phone);
   set('f-website', l.website); set('f-city', l.city); set('f-address', l.address);
   set('f-status', l.status || 'lead'); set('f-source', l.source); set('f-score', l.siteScore);
-  set('f-tier', l.leadTier); set('f-followup', l.followUp); set('f-signals', l.leadSignals);
+  set('f-tier', l.leadTier); set('f-followup', l.followUp); set('f-specurl', l.specUrl); set('f-signals', l.leadSignals);
   openModal('m-lead');
 }
 function saveLead() {
@@ -1041,7 +1099,7 @@ function saveLead() {
     company: v('f-company'), contact: v('f-contact'), email: v('f-email'), phone: v('f-phone'),
     website: v('f-website').replace(/\/$/, ''), city: v('f-city'), address: v('f-address'),
     status: v('f-status'), source: v('f-source'), siteScore: parseInt(v('f-score')) || 0,
-    leadTier: v('f-tier'), followUp: v('f-followup'), leadSignals: v('f-signals'),
+    leadTier: v('f-tier'), followUp: v('f-followup'), specUrl: v('f-specurl'), leadSignals: v('f-signals'),
   };
   if (editingLead) {
     const l = db.leads.find(x => x.id === editingLead);
@@ -1166,12 +1224,16 @@ const ALIASES = {
   leadTier:    ['lead_tier', 'lead tier', 'leadtier', 'tier'],
   leadSignals: ['lead_signals', 'lead signals', 'leadsignals', 'signals', 'defects', 'pitch points'],
   scoreNotes:  ['score_notes', 'score notes', 'scorenotes', 'error', 'fetch error'],
+  reviewCount: ['review_count', 'reviews', 'review count', 'google reviews', 'user_ratings_total', 'userratingcount'],
+  googleRating:['google_rating', 'rating', 'google rating', 'stars'],
+  specUrl:     ['spec_url', 'spec url', 'specurl', 'spec site', 'spec_site', 'demo url', 'demo_url', 'demo', 'preview url', 'preview_url', 'preview'],
   noteText:    ['notes', 'note', 'comments', 'comment', 'description'],
 };
 const FIELD_OPTS = [
   ['company', 'Company'], ['contact', 'Contact name'], ['email', 'Email'], ['phone', 'Phone'],
   ['website', 'Website'], ['address', 'Address'], ['city', 'City'], ['status', 'Status'], ['source', 'Source'],
-  ['siteScore', 'Site score'], ['leadTier', 'Lead tier'], ['leadSignals', 'Lead signals'], ['scoreNotes', 'Score notes'], ['noteText', 'Notes'],
+  ['siteScore', 'Site score'], ['leadTier', 'Lead tier'], ['leadSignals', 'Lead signals'], ['scoreNotes', 'Score notes'],
+  ['reviewCount', 'Google reviews'], ['googleRating', 'Google rating'], ['specUrl', 'Spec site URL'], ['noteText', 'Notes'],
 ];
 let impHeaders = [], impRows = [];
 
@@ -1251,11 +1313,13 @@ function runImport() {
     if (!company && !email) { skipped++; return; }
     let l = (email && db.leads.find(x => x.email && x.email.toLowerCase() === email.toLowerCase()))
          || (company && db.leads.find(x => x.company && x.company.toLowerCase() === company.toLowerCase()));
-    const auditFields = { siteScore: parseInt(get('siteScore')) || 0, leadTier: get('leadTier').toUpperCase(), leadSignals: get('leadSignals'), scoreNotes: get('scoreNotes') };
+    const auditFields = { siteScore: parseInt(get('siteScore')) || 0, leadTier: get('leadTier').toUpperCase(), leadSignals: get('leadSignals'), scoreNotes: get('scoreNotes'),
+      reviewCount: parseInt(get('reviewCount')) || 0, googleRating: parseFloat(get('googleRating')) || 0 };
     if (l) {
       let touched = false;
       Object.entries(auditFields).forEach(([k, v]) => { if (v) { l[k] = v; touched = true; } });
       ['contact', 'phone', 'website', 'address', 'city', 'source'].forEach(f => { const v = get(f); if (v && !l[f]) { l[f] = v; touched = true; } });
+      const su = get('specUrl'); if (su) { l.specUrl = su; touched = true; }
       if (email && !l.email) { l.email = email; touched = true; }
       touched ? updated++ : skipped++;
       return;
@@ -1266,7 +1330,7 @@ function runImport() {
     db.leads.push({
       id: uid(), company, contact: get('contact'), email, phone: get('phone'),
       website: get('website').replace(/\/$/, ''), address: get('address'), city: get('city'),
-      status, source: get('source'), callStatus: '', followUp: '',
+      status, source: get('source'), callStatus: '', followUp: '', specUrl: get('specUrl'),
       notes: noteText ? [{ t: Date.now(), text: noteText }] : [], created: Date.now(),
       ...auditFields,
     });
@@ -1278,8 +1342,8 @@ function runImport() {
 }
 function csvEscape(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"'; }
 function exportLeads() {
-  const cols = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'siteScore', 'leadTier', 'leadSignals', 'scoreNotes', 'callStatus', 'followUp'];
-  const head = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'site_score', 'lead_tier', 'lead_signals', 'score_notes', 'call_status', 'follow_up'];
+  const cols = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'siteScore', 'leadTier', 'leadSignals', 'scoreNotes', 'reviewCount', 'googleRating', 'specUrl', 'callStatus', 'followUp'];
+  const head = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'site_score', 'lead_tier', 'lead_signals', 'score_notes', 'review_count', 'google_rating', 'spec_url', 'call_status', 'follow_up'];
   const rows = visibleLeads().map(l => cols.map(c => csvEscape(l[c])).join(','));
   downloadFile('leads-' + todayStr() + '.csv', [head.join(','), ...rows].join('\r\n'), 'text/csv');
   toast('Exported ' + rows.length + ' leads (current filter)');
@@ -1291,9 +1355,43 @@ function downloadFile(name, content, type) {
 }
 
 /* ═══════════ SETTINGS / BACKUP ═══════════ */
+/* Template editing works on a copy (setTpls) — nothing persists until "Save settings". */
+let setTpls = [], setTplCur = '';
+function setTplRender() {
+  const sel = document.getElementById('set-tpl');
+  sel.innerHTML = setTpls.map(t => `<option value="${esc(t.id)}" ${t.id === setTplCur ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+  const t = setTpls.find(x => x.id === setTplCur) || setTpls[0];
+  setTplCur = t.id;
+  document.getElementById('set-tpl-name').value = t.name;
+  document.getElementById('set-subj').value = t.subj;
+  document.getElementById('set-body').value = t.body;
+  document.getElementById('set-tpl-del').disabled = setTpls.length <= 1;
+}
+function setTplStash() {
+  const t = setTpls.find(x => x.id === setTplCur); if (!t) return;
+  t.name = document.getElementById('set-tpl-name').value;
+  t.subj = document.getElementById('set-subj').value;
+  t.body = document.getElementById('set-body').value;
+  const opt = document.querySelector('#set-tpl option[value="' + setTplCur + '"]');
+  if (opt) opt.textContent = t.name || '(unnamed)';
+}
+function setTplSwitch(id) { setTplCur = id; setTplRender(); }
+function setTplAdd() {
+  const t = { id: 'tpl-' + uid(), name: 'New template', subj: '', body: 'Hi {customer},\n\n\n\nThanks,\n' };
+  setTpls.push(t); setTplCur = t.id; setTplRender();
+  document.getElementById('set-tpl-name').focus();
+}
+function setTplDelete() {
+  if (setTpls.length <= 1) return;
+  const t = setTpls.find(x => x.id === setTplCur);
+  if (!confirm('Delete template "' + (t?.name || '') + '"?')) return;
+  setTpls = setTpls.filter(x => x.id !== setTplCur);
+  setTplCur = setTpls[0].id; setTplRender();
+}
 function openSettings() {
-  document.getElementById('set-subj').value = db.settings.emailSubj;
-  document.getElementById('set-body').value = db.settings.emailBody;
+  setTpls = JSON.parse(JSON.stringify(db.settings.templates || defaultTemplates()));
+  setTplCur = setTpls[0].id;
+  setTplRender();
   document.getElementById('set-handler').value = db.settings.mailHandler || 'gmail';
   document.getElementById('clear-leads-btn').textContent = 'Clear all leads (' + db.leads.length + ')';
   document.getElementById('storage-note').textContent = 'Leadline v' + APP_VERSION + ' · ' + (storageOK
@@ -1302,8 +1400,8 @@ function openSettings() {
   openModal('m-set');
 }
 function saveSettings() {
-  db.settings.emailSubj = document.getElementById('set-subj').value;
-  db.settings.emailBody = document.getElementById('set-body').value;
+  setTplStash();
+  db.settings.templates = setTpls.map(t => ({ id: t.id, name: (t.name || '').trim() || 'Untitled', subj: t.subj, body: t.body }));
   saveDB(); closeModal('m-set'); toast('Settings saved');
 }
 function backupJSON() {
@@ -1320,6 +1418,7 @@ function restoreJSON(input) {
       if (!Array.isArray(d.leads)) throw new Error('not a Leadline backup');
       if (!confirm('Replace all current data with this backup (' + d.leads.length + ' leads)?')) return;
       db = Object.assign({ deals: [], activities: [], log: [], stats: {}, settings: db.settings }, d);
+      migrateTemplates();
       saveDB(); closeModal('m-set'); render(); toast('Backup restored');
     } catch (err) { toast('That file is not a valid Leadline backup.', true); }
   };
