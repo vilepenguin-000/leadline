@@ -3,6 +3,8 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.13.0 Phone column sortable: click the Phone header on the Leads page to sort by
+          phone number (digits normalized + country code stripped, groups by area code).
   v1.12.0 Pitched flag: leads are auto-marked 📨 pitched when you compose a pitch email
           (one-click or from the modal) or copy the email body from the pitch modal.
           Manual toggle in the drawer, "Pitched / Not pitched" filter chips, badge in the
@@ -352,7 +354,7 @@
             <th style="width:30px"><input type="checkbox" id="sel-all" onclick="toggleAll(this)"></th>
             <th data-sort="company" style="min-width:200px">Company / contact<span class="rs">│</span></th>
             <th data-sort="status" style="width:86px">Status<span class="rs">│</span></th>
-            <th style="width:120px">Phone<span class="rs">│</span></th>
+            <th data-sort="phone" style="width:120px">Phone<span class="rs">│</span></th>
             <th data-sort="city" style="width:110px">City<span class="rs">│</span></th>
             <th data-sort="leadTier" style="width:120px">Score / tier<span class="rs">│</span></th>
             <th data-sort="followUp" style="width:130px">Call / follow-up</th>
@@ -536,7 +538,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.12.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.13.0';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -746,6 +748,14 @@ let filters = { status: 'all', tier: 'all', call: null, pitch: null };
 let sort = { key: 'leadTier', dir: 1 };
 let selected = new Set();
 
+// Normalize a phone to sortable digits (area code first). Strips a leading NANP
+// country code '1' and non-digits; empty numbers sort last.
+function phoneKey(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  if (!d) return 'zzzzzzzzzz';
+  return d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+}
+
 document.getElementById('lead-chips').addEventListener('click', e => {
   const chip = e.target.closest('.chip'); if (!chip) return;
   const [group, val] = chip.dataset.f.split(':');
@@ -785,6 +795,7 @@ function visibleLeads() {
     const k = sort.key;
     if (k === 'siteScore') return ((a.siteScore || 0) - (b.siteScore || 0)) * sort.dir;
     if (k === 'leadTier') return (tierRank(a) - tierRank(b)) * sort.dir;
+    if (k === 'phone') return phoneKey(a.phone).localeCompare(phoneKey(b.phone)) * sort.dir;
     return String(a[k] || '').localeCompare(String(b[k] || '')) * sort.dir;
   });
   return rows;
