@@ -3,6 +3,12 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.14.0 Email signature: the CRM now appends your signature to every email it composes
+          (Gmail, Outlook and mailto). A compose link that already carries the body gets no
+          signature from the mail client, and Gmail's compose URL has no signature parameter,
+          so the signature rides along with the body. Edit it in Settings; the pitch modal
+          shows it read-only so what you see is what gets sent; Copy body / Copy both include
+          it. Existing data picks up the default automatically — no migration.
   v1.13.0 Phone column sortable: click the Phone header on the Leads page to sort by
           phone number (digits normalized + country code stripped, groups by area code).
   v1.12.0 Pitched flag: leads are auto-marked 📨 pitched when you compose a pitch email
@@ -491,7 +497,8 @@
     <div class="fg" style="margin-bottom:10px"><label>Template</label><select id="pitch-tpl" onchange="pitchSwitchTpl(this.value)"></select></div>
     <div class="fg" style="margin-bottom:10px"><label>To</label><input id="pitch-to" placeholder="No email on file — copy the text and send it from anywhere"></div>
     <div class="fg" style="margin-bottom:10px"><label>Subject</label><input id="pitch-subj"></div>
-    <div class="fg"><label>Body — edit before sending</label><textarea id="pitch-body" style="min-height:210px;font-size:12.5px"></textarea></div>
+    <div class="fg" style="margin-bottom:10px"><label>Body — edit before sending</label><textarea id="pitch-body" style="min-height:210px;font-size:12.5px"></textarea></div>
+    <div class="fg"><label>Signature — appended automatically (edit in Settings)</label><textarea id="pitch-sig" readonly style="min-height:164px;font-family:var(--mono);font-size:11.5px;opacity:.9"></textarea></div>
   </div>
   <div class="modal-foot" style="justify-content:flex-start">
     <button class="btn" onclick="pitchCopy('subject')">Copy subject</button>
@@ -522,6 +529,9 @@
     <div class="fg" style="margin-bottom:10px"><label>Subject</label><input id="set-subj" oninput="setTplStash()"></div>
     <div class="fg" style="margin-bottom:6px"><label>Body</label><textarea id="set-body" style="min-height:150px;font-family:var(--mono);font-size:12px" oninput="setTplStash()"></textarea></div>
     <div style="font-size:11.5px;color:var(--mut);margin-bottom:16px">Placeholders: {customer} (contact name, or company if none) {company} {contact} {website} {score} {signals} {speclink} — signals become a bulleted list of the site&rsquo;s issues; speclink is the lead&rsquo;s Spec site URL.</div>
+    <div class="d-sec" style="margin-top:0">Email signature</div>
+    <div class="fg" style="margin-bottom:6px"><label>Appended to every email the CRM composes</label><textarea id="set-sig" style="min-height:164px;font-family:var(--mono);font-size:12px"></textarea></div>
+    <div style="font-size:11.5px;color:var(--mut);margin-bottom:16px">Gmail only inserts your Gmail signature when it builds the message itself &mdash; a compose link that already carries the body gets none, and the compose URL has no signature parameter. So the CRM appends this text instead. Plain text only: hosted logos and formatting can&rsquo;t travel through a compose link.</div>
     <div class="d-sec" style="margin-top:0">Backup</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="backupJSON()">⬇ Download backup (JSON)</button>
@@ -538,11 +548,12 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.13.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.14.0';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
 let storageOK = true;
+const DEFAULT_SIGNATURE = `Shawn Bernard\nFounder, WebFrog Studio\n647-874-9020 · shawn@webfrog.ca\nwebfrog.ca · Toronto, Canada\n\n—\nThis is a personal, one-to-one message — not spam. If you’d rather not hear from me again, simply reply "unsubscribe" and I’ll remove you from my list.`;
 function defaultTemplates() {
   return [
     { id: 'tpl-cold', name: 'Cold pitch (site audit)',
@@ -570,6 +581,7 @@ let db = { leads: [], deals: [], activities: [], log: [], stats: {}, settings: {
   highContrast: true,
   mailHandler: 'gmail',
   templates: defaultTemplates(),
+  signature: DEFAULT_SIGNATURE,
 }};
 
 function loadDB() {
@@ -1011,9 +1023,21 @@ function fillTemplate(tpl, l) {
   };
   return String(tpl || '').replace(/\{company\}|\{contact\}|\{customer\}|\{website\}|\{score\}|\{signals\}|\{speclink\}/g, m => vals[m]);
 }
+function emailSignature() { return String(db.settings.signature || '').replace(/\s+$/, ''); }
+/* Gmail and Outlook only insert the account signature when THEY build the body — a compose
+   link that already carries body= gets none, and the compose URL has no signature parameter.
+   So the signature travels with the body from here, and pitchCopy() adds it too so that
+   what you copy is exactly what the mail client receives. */
+function withSignature(body) {
+  const sig = emailSignature();
+  const b = String(body == null ? '' : body).replace(/\s+$/, '');
+  if (!sig) return b;
+  return b ? b + '\n\n' + sig : sig;
+}
 function composeURL(to, subj, body) {
   const handler = db.settings.mailHandler || 'gmail';
   const enc = encodeURIComponent;
+  body = withSignature(body);
   if (handler === 'mailto') return 'mailto:' + enc(to) + '?subject=' + enc(subj) + '&body=' + enc(body);
   if (handler === 'outlook') return 'https://outlook.live.com/mail/0/deeplink/compose?to=' + enc(to) + '&subject=' + enc(subj) + '&body=' + enc(body);
   return 'https://mail.google.com/mail/?view=cm&fs=1&to=' + enc(to) + '&su=' + enc(subj) + '&body=' + enc(body);
@@ -1052,12 +1076,20 @@ function pitchEdit(id, tplId) {
   document.getElementById('pitch-to').value = l.email || '';
   document.getElementById('pitch-subj').value = fillTemplate(t.subj, l);
   document.getElementById('pitch-body').value = fillTemplate(t.body, l);
+  pitchShowSignature();
   openModal('m-pitch');
 }
 function pitchSwitchTpl(tplId) { if (pitchLeadId) pitchEdit(pitchLeadId, tplId); }
+function pitchShowSignature() {
+  const el = document.getElementById('pitch-sig'); if (!el) return;
+  const sig = emailSignature();
+  el.value = sig || '(no signature set — add one in Settings)';
+  el.style.height = 'auto';
+  el.style.height = Math.max(96, el.scrollHeight + 8) + 'px';
+}
 function pitchCopy(which) {
   const subj = document.getElementById('pitch-subj').value;
-  const body = document.getElementById('pitch-body').value;
+  const body = withSignature(document.getElementById('pitch-body').value);
   const text = which === 'subject' ? subj : which === 'body' ? body : 'Subject: ' + subj + '\n\n' + body;
   copyText(text, which === 'both' ? 'Email copied' : 'Copied ' + which);
   /* copying the body (or the whole email) means it's going out — flag the lead */
@@ -1456,6 +1488,7 @@ function openSettings() {
   setTplCur = setTpls[0].id;
   setTplRender();
   document.getElementById('set-handler').value = db.settings.mailHandler || 'gmail';
+  document.getElementById('set-sig').value = db.settings.signature || '';
   document.getElementById('clear-leads-btn').textContent = 'Clear all leads (' + db.leads.length + ')';
   document.getElementById('storage-note').textContent = 'Leadline v' + APP_VERSION + ' · ' + (storageOK
     ? 'Data is saved in this browser (localStorage). Download a backup before clearing browser data or switching machines.'
@@ -1465,6 +1498,7 @@ function openSettings() {
 function saveSettings() {
   setTplStash();
   db.settings.templates = setTpls.map(t => ({ id: t.id, name: (t.name || '').trim() || 'Untitled', subj: t.subj, body: t.body }));
+  db.settings.signature = document.getElementById('set-sig').value;
   saveDB(); closeModal('m-set'); toast('Settings saved');
 }
 function backupJSON() {
