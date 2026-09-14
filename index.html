@@ -3,6 +3,11 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.14.1 Score sort: the "Score / tier" column on the Leads page now sorts by the numeric
+          website score (lowest first on the first click, click again to reverse) instead of
+          tier warmth. Unscored leads pin to the top of the list so you can work through them
+          first, kept separate from low scores. The sort key was already wired to siteScore
+          under the hood; the header just never pointed at it.
   v1.14.0 Email signature: the CRM now appends your signature to every email it composes
           (Gmail, Outlook and mailto). A compose link that already carries the body gets no
           signature from the mail client, and Gmail's compose URL has no signature parameter,
@@ -362,7 +367,7 @@
             <th data-sort="status" style="width:86px">Status<span class="rs">│</span></th>
             <th data-sort="phone" style="width:120px">Phone<span class="rs">│</span></th>
             <th data-sort="city" style="width:110px">City<span class="rs">│</span></th>
-            <th data-sort="leadTier" style="width:120px">Score / tier<span class="rs">│</span></th>
+            <th data-sort="siteScore" style="width:120px">Score / tier<span class="rs">│</span></th>
             <th data-sort="followUp" style="width:130px">Call / follow-up</th>
           </tr></thead>
           <tbody id="leads-tbody"></tbody>
@@ -548,7 +553,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.14.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.14.1';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -805,7 +810,14 @@ function visibleLeads() {
   });
   rows.sort((a, b) => {
     const k = sort.key;
-    if (k === 'siteScore') return ((a.siteScore || 0) - (b.siteScore || 0)) * sort.dir;
+    if (k === 'siteScore') {
+      const av = a.siteScore ? Number(a.siteScore) : null;
+      const bv = b.siteScore ? Number(b.siteScore) : null;
+      if (av == null && bv == null) return 0;
+      if (av == null) return -sort.dir;
+      if (bv == null) return sort.dir;
+      return (av - bv) * sort.dir;
+    }
     if (k === 'leadTier') return (tierRank(a) - tierRank(b)) * sort.dir;
     if (k === 'phone') return phoneKey(a.phone).localeCompare(phoneKey(b.phone)) * sort.dir;
     return String(a[k] || '').localeCompare(String(b[k] || '')) * sort.dir;
