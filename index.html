@@ -3,6 +3,9 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.15.0 Multiple lead lists: topbar dropdown switches between named lists (each holds
+          its own leads), all in localStorage. ＋ New / rename / delete lists, bulk
+          "Move to list". Import & export always target the active list.
   v1.14.1 Score sort: the "Score / tier" column on the Leads page now sorts by the numeric
           website score (lowest first on the first click, click again to reverse) instead of
           tier warmth. Unscored leads pin to the top of the list so you can work through them
@@ -291,6 +294,13 @@
 
 <div id="main">
   <div class="topbar">
+    <div class="list-switch" style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:10.5px;color:var(--mut);font-weight:700;letter-spacing:1.2px">LIST</span>
+      <select id="list-select" onchange="switchList(this.value)" title="Switch lead list" style="background:var(--ink);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:6px 8px;font-size:12.5px;font-family:inherit;max-width:220px"></select>
+      <button class="btn btn-sm" onclick="newList()" title="New list">＋ New</button>
+      <button class="btn btn-sm" onclick="renameList()" title="Rename current list">✎</button>
+      <button class="btn btn-sm" onclick="deleteList()" title="Delete current list">🗑</button>
+    </div>
     <div class="search">🔎 <input id="q" placeholder="Search leads…" autocomplete="off"><kbd>/</kbd></div>
     <button class="btn btn-sm" id="hc-btn" onclick="toggleHC()" title="Toggle high contrast">◐ Contrast</button>
     <span id="worktimer" class="mono" title="Calling window: 10:00–16:00" style="font-size:12px;font-weight:600;padding:5px 10px;border:1px solid var(--line);border-radius:8px;white-space:nowrap"></span>
@@ -356,6 +366,8 @@
         </select>
         <button class="btn btn-sm" onclick="bulkApplyStatus()">Apply</button>
         <button class="btn btn-sm" onclick="bulkPitched()">📨 Mark pitched</button>
+        <select id="bulk-movelist" class="btn btn-sm" style="padding:4px 8px"><option value="">Move to list…</option></select>
+        <button class="btn btn-sm" onclick="bulkMoveList()">Move</button>
         <button class="btn btn-sm btn-danger" onclick="bulkDelete()">Delete selected</button>
         <button class="btn btn-sm" onclick="clearSel()" style="margin-left:auto">Clear selection</button>
       </div>
@@ -553,7 +565,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.14.1';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.15.0';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -595,10 +607,99 @@ function loadDB() {
     if (raw) { const d = JSON.parse(raw); const defaults = Object.assign({}, db.settings); db = Object.assign(db, d); db.settings = Object.assign(defaults, d.settings || {}); }
     migrateTemplates();
   } catch (e) { storageOK = false; }
+  linkActiveList();
 }
 function saveDB() {
   try { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
   catch (e) { if (storageOK) { storageOK = false; toast('Storage unavailable — changes will be lost when you close this tab. Download a backup from Settings.', true); } }
+}
+/* ═══════════ LEAD LISTS (multi-list) ═══════════
+   db.lists = { name: [leads...] }, db.activeList = active name. All in the one
+   DB_KEY blob, so localStorage carries every list with zero extra work.
+   db.leads is a non-enumerable accessor proxying the active list — existing code
+   keeps reading/writing db.leads unchanged, and JSON.stringify skips it (only
+   db.lists + db.activeList persist). */
+function linkActiveList() {
+  if (!db.lists || typeof db.lists !== 'object' || Array.isArray(db.lists) || !Object.keys(db.lists).length) {
+    const existing = Array.isArray(db.leads) ? db.leads : [];
+    db.lists = { 'All Leads': existing };
+    db.activeList = 'All Leads';
+  }
+  if (!db.lists[db.activeList]) db.activeList = Object.keys(db.lists)[0];
+  try { delete db.leads; } catch (e) {}
+  Object.defineProperty(db, 'leads', {
+    get() { return this.lists[this.activeList] || (this.lists[this.activeList] = []); },
+    set(v) { this.lists[this.activeList] = v; },
+    enumerable: false, configurable: true,
+  });
+}
+function renderListSelect() {
+  const sel = document.getElementById('list-select');
+  if (sel) sel.innerHTML = Object.keys(db.lists).map(n =>
+    `<option value="${esc(n)}" ${n === db.activeList ? 'selected' : ''}>${esc(n)} (${db.lists[n].length})</option>`).join('');
+  const mv = document.getElementById('bulk-movelist');
+  if (mv) mv.innerHTML = '<option value="">Move to list…</option>' + Object.keys(db.lists).filter(n => n !== db.activeList).map(n =>
+    `<option value="${esc(n)}">${esc(n)} (${db.lists[n].length})</option>`).join('');
+}
+function resetListCtx() { queue = []; queueIdx = 0; selected = new Set(); }
+function switchList(name) {
+  if (!name || name === db.activeList || !db.lists[name]) return;
+  db.activeList = name;
+  resetListCtx();
+  addLog('Switched to list "' + name + '"');
+  saveDB(); render();
+}
+function newList() {
+  const raw = prompt('Name for the new lead list:');
+  if (!raw) return;
+  const n = raw.trim();
+  if (!n) return;
+  if (db.lists[n]) { toast('A list named "' + n + '" already exists.', true); return; }
+  db.lists[n] = [];
+  db.activeList = n;
+  resetListCtx();
+  addLog('Created list "' + n + '"');
+  saveDB(); render();
+  toast('Created "' + n + '". Import a CSV or add leads to fill it.');
+}
+function renameList() {
+  const cur = db.activeList;
+  const raw = prompt('Rename list "' + cur + '" to:', cur);
+  if (!raw) return;
+  const n = raw.trim();
+  if (!n || n === cur) return;
+  if (db.lists[n]) { toast('A list named "' + n + '" already exists.', true); return; }
+  db.lists[n] = db.lists[cur];
+  delete db.lists[cur];
+  db.activeList = n;
+  addLog('Renamed list "' + cur + '" to "' + n + '"');
+  saveDB(); render();
+}
+function deleteList() {
+  const cur = db.activeList;
+  const names = Object.keys(db.lists);
+  if (names.length <= 1) { toast('You need at least one list.', true); return; }
+  const n = db.lists[cur].length;
+  if (!confirm('Delete list "' + cur + '"' + (n ? ' and its ' + n + ' lead' + (n === 1 ? '' : 's') : '') + '? This cannot be undone.')) return;
+  delete db.lists[cur];
+  db.activeList = names.find(x => x !== cur);
+  resetListCtx();
+  addLog('Deleted list "' + cur + '"');
+  saveDB(); render();
+}
+function bulkMoveList() {
+  const target = document.getElementById('bulk-movelist').value;
+  if (!target) { toast('Pick a target list first.', true); return; }
+  if (target === db.activeList) { toast('Leads are already in that list.', true); return; }
+  const ids = new Set(selected);
+  const moving = db.leads.filter(l => ids.has(l.id));
+  if (!moving.length) return;
+  db.leads = db.leads.filter(l => !ids.has(l.id));
+  db.lists[target] = (db.lists[target] || []).concat(moving);
+  addLog('Moved ' + moving.length + ' lead' + (moving.length === 1 ? '' : 's') + ' to "' + target + '"');
+  selected = new Set();
+  saveDB(); render();
+  toast('Moved ' + moving.length + ' lead' + (moving.length === 1 ? '' : 's') + ' to "' + target + '"');
 }
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -657,6 +758,7 @@ function go(page) {
 document.querySelectorAll('.nav-item[data-page]').forEach(n => n.addEventListener('click', () => go(n.dataset.page)));
 
 function render() {
+  renderListSelect();
   renderNavCounts();
   if (currentPage === 'dashboard') renderDashboard();
   else if (currentPage === 'leads') renderLeads();
@@ -1524,10 +1626,12 @@ function restoreJSON(input) {
   reader.onload = e => {
     try {
       const d = JSON.parse(e.target.result);
-      if (!Array.isArray(d.leads)) throw new Error('not a Leadline backup');
-      if (!confirm('Replace all current data with this backup (' + d.leads.length + ' leads)?')) return;
+      if (!Array.isArray(d.leads) && !(d.lists && typeof d.lists === 'object' && !Array.isArray(d.lists))) throw new Error('not a Leadline backup');
+      const n = d.leads ? d.leads.length : Object.values(d.lists).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+      if (!confirm('Replace all current data with this backup (' + n + ' leads)?')) return;
       db = Object.assign({ deals: [], activities: [], log: [], stats: {}, settings: db.settings }, d);
       migrateTemplates();
+      linkActiveList();
       saveDB(); closeModal('m-set'); render(); toast('Backup restored');
     } catch (err) { toast('That file is not a valid Leadline backup.', true); }
   };
