@@ -3,6 +3,14 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.17.0 Call-result row tinting. Every row on the Leads table is tinted by its call
+          result — green Answered, blue Voicemail, amber No answer, violet Callback, red
+          Not interested, grey Junk — while an uncalled lead keeps the plain row, so who has
+          already been called reads at a glance. A legend under the filter chips names each
+          colour. The Call / follow-up column still spells the result out as text, so nothing
+          is conveyed by colour alone, and the tint alphas were set from measured contrast
+          (main text >=11.6:1, the small muted sub-text >=4.9:1) in both contrast modes.
+
   v1.16.0 Stage editing in place, and readable columns. The Status column on the Leads
           table is now a dropdown styled as the same badge (Lead / Prospect / Customer /
           Churned) and the drawer gains a Stage row matching the Call status buttons, so a
@@ -203,6 +211,44 @@
   #leads-table td:nth-child(2) { max-width: 0; }
   tbody tr { cursor: pointer; } tbody tr:hover td { background: var(--raise); }
   tbody tr.selected td { background: rgba(255,178,36,.07); }
+  /* ── Call-result row tint: one glance shows who has been called ──
+     Supplementary cue only. The Call / follow-up column already spells the
+     result out as text, so nothing is communicated by colour alone.
+     Alphas come from measured contrast, not taste: at these values the muted
+     11px sub-text stays >=4.9:1 over every tint and the main text >=11.6:1, and
+     hover stays inside the 4.5:1 ceiling (WCAG AA = 4.5:1). */
+  tbody tr.called td { background: var(--rowtint, transparent); }
+  tbody tr.called:hover td { background: var(--rowhover, var(--raise)); }
+  tbody tr.called       { --rowtint: rgba(255,255,255,.05); --rowhover: rgba(255,255,255,.10); }
+  tbody tr.st-answered  { --rowtint: rgba(64,196,120,.12);  --rowhover: rgba(64,196,120,.16); }
+  tbody tr.st-voicemail { --rowtint: rgba(96,165,250,.13);  --rowhover: rgba(96,165,250,.17); }
+  tbody tr.st-noanswer  { --rowtint: rgba(255,178,36,.11);  --rowhover: rgba(255,178,36,.14); }
+  tbody tr.st-callback  { --rowtint: rgba(167,139,250,.13); --rowhover: rgba(167,139,250,.17); }
+  tbody tr.st-notint    { --rowtint: rgba(239,107,107,.12); --rowhover: rgba(239,107,107,.19); }
+  tbody tr.st-junk      { --rowtint: rgba(139,151,171,.10); --rowhover: rgba(139,151,171,.18); }
+  /* high-contrast mode: stronger tints, and keep them on hover */
+  body.hc tbody tr.called       { --rowtint: rgba(255,255,255,.10); --rowhover: rgba(255,255,255,.18); }
+  body.hc tbody tr.st-answered  { --rowtint: rgba(64,196,120,.24);  --rowhover: rgba(64,196,120,.36); }
+  body.hc tbody tr.st-voicemail { --rowtint: rgba(96,165,250,.24);  --rowhover: rgba(96,165,250,.36); }
+  body.hc tbody tr.st-noanswer  { --rowtint: rgba(255,178,36,.22);  --rowhover: rgba(255,178,36,.34); }
+  body.hc tbody tr.st-callback  { --rowtint: rgba(167,139,250,.26); --rowhover: rgba(167,139,250,.38); }
+  body.hc tbody tr.st-notint    { --rowtint: rgba(239,107,107,.24); --rowhover: rgba(239,107,107,.36); }
+  body.hc tbody tr.st-junk      { --rowtint: rgba(139,151,171,.20); --rowhover: rgba(139,151,171,.30); }
+  body.hc tbody tr.called:hover td { background: var(--rowhover); }
+  /* selection tint stays visible on top of any call tint */
+  tbody tr.selected td, tbody tr.selected:hover td { background: rgba(255,178,36,.16); }
+  .call-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+                 margin: 2px 0 10px; font-size: 11.5px; color: var(--mut); }
+  .call-legend .cl-label { color: var(--text); font-weight: 600; }
+  .call-legend .cl-item { display: inline-flex; align-items: center; gap: 5px; }
+  .call-legend .cl-sw { width: 13px; height: 13px; border-radius: 3px; display: inline-block;
+                        border: 1px solid var(--line); }
+  .cl-sw.st-answered  { background: rgba(64,196,120,.45); }
+  .cl-sw.st-voicemail { background: rgba(96,165,250,.45); }
+  .cl-sw.st-noanswer  { background: rgba(255,178,36,.45); }
+  .cl-sw.st-callback  { background: rgba(167,139,250,.48); }
+  .cl-sw.st-notint    { background: rgba(239,107,107,.45); }
+  .cl-sw.st-junk      { background: rgba(139,151,171,.40); }
   td.mono, .mono { font-family: var(--mono); font-size: 12px; }
   .empty { padding: 48px; text-align: center; color: var(--mut); }
   .empty .e-big { font-size: 30px; margin-bottom: 8px; }
@@ -375,6 +421,16 @@
         <div class="chip-div"></div>
         <div class="chip" data-f="pitch:pitched">📨 Pitched</div>
         <div class="chip" data-f="pitch:unpitched">Not pitched</div>
+      </div>
+      <div class="call-legend">
+        <span class="cl-label">Row colour → call result:</span>
+        <span class="cl-item"><i class="cl-sw st-answered"></i>Answered</span>
+        <span class="cl-item"><i class="cl-sw st-voicemail"></i>Voicemail</span>
+        <span class="cl-item"><i class="cl-sw st-noanswer"></i>No answer</span>
+        <span class="cl-item"><i class="cl-sw st-callback"></i>Callback</span>
+        <span class="cl-item"><i class="cl-sw st-notint"></i>Not interested</span>
+        <span class="cl-item"><i class="cl-sw st-junk"></i>Junk</span>
+        <span class="cl-item"><i class="cl-sw"></i>Not called yet</span>
       </div>
       <div id="bulkbar">
         <span id="bulk-n" class="mono">0 selected</span>
@@ -583,7 +639,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.16.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.17.0';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -960,7 +1016,8 @@ function renderLeads() {
       const scol = sc == null ? '' : sc >= 70 ? 'var(--mint)' : sc >= 40 ? '#e8d24d' : 'var(--ember)';
       const overdue = l.followUp && l.followUp < todayStr();
       const webHref = l.website ? (/^https?:/.test(l.website) ? l.website : 'https://' + l.website) : '';
-      return `<tr class="${selected.has(l.id) ? 'selected' : ''}" onclick="if(!event.target.closest('input,button,a,select'))openDrawer('${l.id}')">
+      const csCls = l.callStatus ? ' called st-' + l.callStatus : '';
+      return `<tr class="${selected.has(l.id) ? 'selected' : ''}${csCls}" onclick="if(!event.target.closest('input,button,a,select'))openDrawer('${l.id}')">
         <td><input type="checkbox" ${selected.has(l.id) ? 'checked' : ''} onclick="toggleSel('${l.id}',this)"></td>
         <td><div style="font-weight:600">${esc(l.company) || '—'}${webHref ? ` <a href="${esc(webHref)}" target="_blank" rel="noopener" title="${esc(l.website)}" onclick="event.stopPropagation()">🌐</a>` : ''}</div>${l.contact ? `<div class="sub">${esc(l.contact)}</div>` : ''}</td>
         <td><select class="badge b-${l.status} status-sel" aria-label="Status for ${esc(l.company)}" title="Change status" onclick="event.stopPropagation()" onchange="setStatus('${l.id}', this.value, false)">${STATUSES.map(([k, lbl]) => `<option value="${k}"${(l.status || 'lead') === k ? ' selected' : ''}>${lbl}</option>`).join('')}</select></td>
