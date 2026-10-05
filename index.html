@@ -1019,7 +1019,7 @@ function renderLeads() {
       const csCls = l.callStatus ? ' called st-' + l.callStatus : '';
       return `<tr class="${selected.has(l.id) ? 'selected' : ''}${csCls}" onclick="if(!event.target.closest('input,button,a,select'))openDrawer('${l.id}')">
         <td><input type="checkbox" ${selected.has(l.id) ? 'checked' : ''} onclick="toggleSel('${l.id}',this)"></td>
-        <td><div style="font-weight:600">${esc(l.company) || '—'}${webHref ? ` <a href="${esc(webHref)}" target="_blank" rel="noopener" title="${esc(l.website)}" onclick="event.stopPropagation()">🌐</a>` : ''}</div>${l.contact ? `<div class="sub">${esc(l.contact)}</div>` : ''}</td>
+        <td><div style="font-weight:600">${esc(l.company) || '—'}${webHref ? ` <a href="${esc(webHref)}" target="_blank" rel="noopener noreferrer" title="${esc(l.website)}" onclick="event.stopPropagation()">🌐</a>` : ''}</div>${l.contact ? `<div class="sub">${esc(l.contact)}</div>` : ''}</td>
         <td><select class="badge b-${l.status} status-sel" aria-label="Status for ${esc(l.company)}" title="Change status" onclick="event.stopPropagation()" onchange="setStatus('${l.id}', this.value, false)">${STATUSES.map(([k, lbl]) => `<option value="${k}"${(l.status || 'lead') === k ? ' selected' : ''}>${lbl}</option>`).join('')}</select></td>
         <td class="mono">${esc(l.phone) || '—'}</td>
         <td>${esc(l.city) || '—'}</td>
@@ -1085,8 +1085,8 @@ function openDrawer(id) {
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <span class="badge b-${l.status}">${l.status}</span>${tierBadge(l)}
       ${l.phone ? `<a class="btn btn-sm" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>` : ''}
-      ${webHref ? `<a class="btn btn-sm" href="${esc(webHref)}" target="_blank" rel="noopener">🌐 Site</a>` : ''}
-      ${l.specUrl ? `<a class="btn btn-sm" href="${esc(/^https?:\/\//i.test(l.specUrl) ? l.specUrl : 'https://' + l.specUrl)}" target="_blank" rel="noopener">🐸 Spec site</a>` : ''}
+      ${webHref ? `<a class="btn btn-sm" href="${esc(webHref)}" target="_blank" rel="noopener noreferrer">🌐 Site</a>` : ''}
+      ${l.specUrl ? `<a class="btn btn-sm" href="${esc(/^https?:\/\//i.test(l.specUrl) ? l.specUrl : 'https://' + l.specUrl)}" target="_blank" rel="noopener noreferrer">🐸 Spec site</a>` : ''}
       <button class="btn btn-sm" onclick="googleLead('${l.id}')">🔍 Google</button>
       <button class="btn btn-sm btn-amber" onclick="openPitch('${l.id}')">✉️ Pitch email</button>
       ${l.pitchedAt
@@ -1203,7 +1203,7 @@ function deleteLead(id) {
 }
 function googleLead(id) {
   const l = db.leads.find(x => x.id === id); if (!l) return;
-  window.open('https://www.google.com/search?q=' + encodeURIComponent((l.company || '') + ' ' + (l.city || '')), '_blank');
+  window.open('https://www.google.com/search?q=' + encodeURIComponent((l.company || '') + ' ' + (l.city || '')), '_blank', 'noopener,noreferrer');
 }
 function copyText(text, okMsg) {
   const done = () => toast(okMsg);
@@ -1269,7 +1269,7 @@ function openPitch(id) {
   }
   let win = null;
   if (db.settings.mailHandler === 'mailto') { const a = document.createElement('a'); a.href = url; a.click(); win = true; }
-  else win = window.open(url, '_blank', 'noopener');
+  else win = window.open(url, '_blank', 'noopener,noreferrer');
   if (!win) { pitchEdit(id); toast('Pop-up blocked — review and copy the email here instead.'); return; }
   addLog('Pitch email composed for ' + esc(l.company));
   autoPitched(l);
@@ -1310,7 +1310,7 @@ function pitchSend() {
   const url = composeURL(document.getElementById('pitch-to').value.trim(),
     document.getElementById('pitch-subj').value, document.getElementById('pitch-body').value);
   if (db.settings.mailHandler === 'mailto') { const a = document.createElement('a'); a.href = url; a.click(); }
-  else window.open(url, '_blank', 'noopener');
+  else window.open(url, '_blank', 'noopener,noreferrer');
   const l = pitchLeadId && db.leads.find(x => x.id === pitchLeadId);
   if (l) { addLog('Pitch email composed for ' + esc(l.company)); autoPitched(l); }
 }
@@ -1347,7 +1347,7 @@ function renderQueue() {
   wrap.innerHTML = `<div class="card" style="padding:26px">
     <div class="q-meta"><span>${tierBadge(l)}${l.pitchedAt ? ` <span style="color:var(--sky);font:600 11px var(--mono)">📨 PITCHED ${fmtPitched(l.pitchedAt).toUpperCase()}</span>` : ''}</span><span>${esc(l.city) || ''}${l.source ? ' · ' + esc(l.source) : ''}</span></div>
     <div class="q-company">${esc(l.company)}</div>
-    <div class="q-sub">${esc(l.contact) || 'No contact name'}${webHref ? ` · <a href="${esc(webHref)}" target="_blank" rel="noopener">${esc(l.website.replace(/^https?:\/\//, ''))}</a>` : ''}</div>
+    <div class="q-sub">${esc(l.contact) || 'No contact name'}${webHref ? ` · <a href="${esc(webHref)}" target="_blank" rel="noopener noreferrer">${esc(l.website.replace(/^https?:\/\//, ''))}</a>` : ''}</div>
     <a class="q-phone" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>
     <div style="display:flex;gap:18px;align-items:flex-start">
       ${sc ? `<div><div class="q-score" style="color:${scol}">${sc}</div><div style="font:600 10px var(--mono);color:var(--mut)">SITE SCORE</div></div>` : ''}
