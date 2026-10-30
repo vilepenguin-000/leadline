@@ -3,6 +3,16 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.18.0 Call-sheet pitch fields. A call sheet generated on office2 now imports its
+          angle / opener / proof / verified / evidence columns straight into a lead, so the
+          words you pitch with live in the CRM instead of a CSV. The opening line shows on
+          the call-queue card above the phone number, in the lead drawer under a Pitch
+          heading with a copy button, and as a 💬 line in the Leads table's call column.
+          outcome maps onto the call-status vocabulary (unknown words are dropped, never
+          written as a bogus status), next_call maps onto the follow-up date, and a note
+          column appends to the lead's notes. Pitch text is the only field that overwrites
+          on re-import — the newest sheet wins — because a re-verification makes the old
+          angle stale. Re-importing the same sheet updates in place, never duplicates.
   v1.17.0 Call-result row tinting. Every row on the Leads table is tinted by its call
           result — green Answered, blue Voicemail, amber No answer, violet Callback, red
           Not interested, grey Junk — while an uncalled lead keeps the plain row, so who has
@@ -294,6 +304,14 @@
   .q-company { font: 700 34px/1.1 var(--disp); letter-spacing: .4px; margin-bottom: 4px; }
   .q-sub { color: var(--mut); font-size: 13px; margin-bottom: 16px; }
   .q-phone { display: inline-flex; align-items: center; gap: 10px; font: 700 26px var(--mono); color: var(--amber); margin-bottom: 16px; }
+  .q-pitch { background: var(--ink); border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+  .q-angle { font: 700 13px var(--disp); letter-spacing: .3px; margin-bottom: 6px; }
+  .q-opener { font-size: 14.5px; line-height: 1.5; color: var(--text); margin-bottom: 8px; }
+  .q-verified { font: 600 10.5px var(--mono); color: var(--mut); margin-top: 6px; letter-spacing: .3px; }
+  .pitch-box { background: var(--ink); border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 8px; padding: 11px 13px; }
+  .p-angle { font: 700 12.5px var(--disp); letter-spacing: .3px; margin-bottom: 6px; }
+  .p-opener { font-size: 13.5px; line-height: 1.5; margin-bottom: 8px; }
+  .p-verified { font: 600 10px var(--mono); color: var(--mut); margin-top: 7px; letter-spacing: .3px; }
   .q-score { font: 700 42px/1 var(--disp); }
   .q-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
   .q-btn { padding: 13px 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--raise); color: var(--text); font-weight: 700; font-size: 13px; cursor: pointer; }
@@ -639,7 +657,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.17.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.18.0';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -1024,7 +1042,7 @@ function renderLeads() {
         <td class="mono">${esc(l.phone) || '—'}</td>
         <td>${esc(l.city) || '—'}</td>
         <td><span class="mono" style="font-weight:700;color:${scol}">${sc ?? '—'}</span> ${tierBadge(l)}${l.reviewCount ? `<div class="sub">★ ${l.googleRating || '–'} · ${l.reviewCount} reviews</div>` : ''}</td>
-        <td><div style="font-size:11px;color:var(--mut)">${csLabel(l.callStatus).replace(/^\S+ /, '') || '—'}</div>${l.pitchedAt ? `<div class="sub" style="color:var(--sky)">📨 pitched ${fmtPitched(l.pitchedAt)}</div>` : ''}${l.followUp ? `<div class="sub mono ${overdue ? 'overdue' : ''}">↳ ${l.followUp}</div>` : ''}</td>
+        <td><div style="font-size:11px;color:var(--mut)">${csLabel(l.callStatus).replace(/^\S+ /, '') || '—'}</div>${l.pitchAngle ? `<div class="sub" style="color:var(--amber)" title="${esc(l.pitchAngle)}">💬 ${esc(l.pitchAngle.slice(0, 46))}${l.pitchAngle.length > 46 ? '…' : ''}</div>` : ''}${l.pitchedAt ? `<div class="sub" style="color:var(--sky)">📨 pitched ${fmtPitched(l.pitchedAt)}</div>` : ''}${l.followUp ? `<div class="sub mono ${overdue ? 'overdue' : ''}">↳ ${l.followUp}</div>` : ''}</td>
       </tr>`;
     }).join('');
   }
@@ -1093,6 +1111,14 @@ function openDrawer(id) {
         ? `<button class="btn btn-sm" style="color:var(--sky);border-color:var(--sky)" title="Pitched ${new Date(l.pitchedAt).toLocaleString()} — click to clear" onclick="markPitched('${l.id}', false)">📨 Pitched ${fmtPitched(l.pitchedAt)}</button>`
         : `<button class="btn btn-sm" title="Flag this lead as already pitched" onclick="markPitched('${l.id}', true)">📨 Mark pitched</button>`}
     </div>
+
+    ${(l.pitchAngle || l.pitchOpener || l.pitchProof) ? `<div class="d-sec">Pitch</div>
+    <div class="pitch-box">
+      ${l.pitchAngle ? `<div class="p-angle">${esc(l.pitchAngle)}</div>` : ''}
+      ${l.pitchOpener ? `<div class="p-opener">“${esc(l.pitchOpener)}”<button class="btn btn-sm" style="margin-left:6px" onclick="copyPitchOpener('${l.id}')">copy</button></div>` : ''}
+      ${l.pitchProof ? proofList(l.pitchProof) : ''}
+      ${l.verifiedAt ? `<div class="p-verified">Verified ${esc(l.verifiedAt)}${l.verifiedEvidence ? ' · ' + esc(l.verifiedEvidence) : ''}</div>` : ''}
+    </div>` : ''}
 
     <div class="d-sec">Details</div>
     <div class="d-grid">
@@ -1349,6 +1375,12 @@ function renderQueue() {
     <div class="q-company">${esc(l.company)}</div>
     <div class="q-sub">${esc(l.contact) || 'No contact name'}${webHref ? ` · <a href="${esc(webHref)}" target="_blank" rel="noopener noreferrer">${esc(l.website.replace(/^https?:\/\//, ''))}</a>` : ''}</div>
     <a class="q-phone" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>
+    ${(l.pitchOpener || l.pitchAngle) ? `<div class="q-pitch">
+      ${l.pitchAngle ? `<div class="q-angle">${esc(l.pitchAngle)}</div>` : ''}
+      ${l.pitchOpener ? `<div class="q-opener">“${esc(l.pitchOpener)}”</div>` : ''}
+      ${l.pitchProof ? proofList(l.pitchProof) : ''}
+      ${l.verifiedAt ? `<div class="q-verified">Verified ${esc(l.verifiedAt)}${l.verifiedEvidence ? ' · ' + esc(l.verifiedEvidence.slice(0, 62)) : ''}</div>` : ''}
+    </div>` : ''}
     <div style="display:flex;gap:18px;align-items:flex-start">
       ${sc ? `<div><div class="q-score" style="color:${scol}">${sc}</div><div style="font:600 10px var(--mono);color:var(--mut)">SITE SCORE</div></div>` : ''}
       ${l.reviewCount ? `<div><div class="q-score" style="color:var(--mint)">${l.reviewCount}</div><div style="font:600 10px var(--mono);color:var(--mut)">REVIEWS${l.googleRating ? ' · ★ ' + l.googleRating : ''}</div></div>` : ''}
@@ -1527,12 +1559,22 @@ const ALIASES = {
   specUrl:     ['spec_url', 'spec url', 'specurl', 'spec site', 'spec_site', 'demo url', 'demo_url', 'demo', 'preview url', 'preview_url', 'preview'],
   noteText:    ['notes', 'note', 'comments', 'comment', 'description'],
   pitchedAt:   ['pitched_at', 'pitched at', 'pitchedat', 'pitched', 'pitch date', 'pitch_date', 'pitchdate', 'date pitched'],
+  pitchAngle:  ['angle', 'pitch angle', 'pitch_angle', 'call angle', 'call_angle', 'segment'],
+  pitchOpener: ['opener', 'pitch', 'pitch line', 'pitch_line', 'opening line', 'opening_line', 'pitch_opener', 'script'],
+  pitchProof:  ['proof', 'proof points', 'proof_points', 'pitch proof', 'pitchpoints'],
+  verifiedAt:  ['verified', 'last verified', 'verified_at', 'verified date', 'checked'],
+  verifiedEvidence: ['evidence', 'evidence today', 'verdict_detail', 'verdict detail', 'verification'],
+  callStatus:  ['call_status', 'call status', 'outcome', 'call outcome'],
+  followUp:    ['follow_up', 'follow up', 'followup', 'next_call', 'next call', 'nextcall', 'next call date'],
 };
 const FIELD_OPTS = [
   ['company', 'Company'], ['contact', 'Contact name'], ['email', 'Email'], ['phone', 'Phone'],
   ['website', 'Website'], ['address', 'Address'], ['city', 'City'], ['status', 'Status'], ['source', 'Source'],
   ['siteScore', 'Site score'], ['leadTier', 'Lead tier'], ['leadSignals', 'Lead signals'], ['scoreNotes', 'Score notes'],
   ['reviewCount', 'Google reviews'], ['googleRating', 'Google rating'], ['specUrl', 'Spec site URL'], ['pitchedAt', 'Pitched date'], ['noteText', 'Notes'],
+  ['pitchAngle', 'Pitch angle'], ['pitchOpener', 'Pitch opener'], ['pitchProof', 'Proof points'],
+  ['verifiedAt', 'Verified date'], ['verifiedEvidence', 'Verification evidence'],
+  ['callStatus', 'Call status'], ['followUp', 'Follow-up / next call'],
 ];
 let impHeaders = [], impRows = [];
 
@@ -1627,6 +1669,15 @@ function runImport() {
       const su = get('specUrl'); if (su) { l.specUrl = su; touched = true; }
       const pa = parsePitched(get('pitchedAt')); if (pa && !l.pitchedAt) { l.pitchedAt = pa; touched = true; }
       if (email && !l.email) { l.email = email; touched = true; }
+      /* pitch text is regenerated with every sheet, so the newest sheet wins;
+         status / follow-up / notes only fill gaps so your own work is never lost */
+      ['pitchAngle', 'pitchOpener', 'pitchProof', 'verifiedAt', 'verifiedEvidence'].forEach(f => {
+        const v = get(f); if (v && l[f] !== v) { l[f] = v; touched = true; }
+      });
+      const csIn = normCallStatus(get('callStatus')); if (csIn && !l.callStatus) { l.callStatus = csIn; touched = true; }
+      const fuIn = normDate(get('followUp')); if (fuIn && !l.followUp) { l.followUp = fuIn; touched = true; }
+      const noteIn = get('noteText');
+      if (noteIn) { if (!Array.isArray(l.notes)) l.notes = []; l.notes.unshift({ t: Date.now(), text: noteIn }); touched = true; }
       touched ? updated++ : skipped++;
       return;
     }
@@ -1636,7 +1687,9 @@ function runImport() {
     db.leads.push({
       id: uid(), company, contact: get('contact'), email, phone: get('phone'),
       website: get('website').replace(/\/$/, ''), address: get('address'), city: get('city'),
-      status, source: get('source'), callStatus: '', followUp: '', specUrl: get('specUrl'), pitchedAt: parsePitched(get('pitchedAt')),
+      status, source: get('source'), callStatus: normCallStatus(get('callStatus')), followUp: normDate(get('followUp')), specUrl: get('specUrl'), pitchedAt: parsePitched(get('pitchedAt')),
+      pitchAngle: get('pitchAngle'), pitchOpener: get('pitchOpener'), pitchProof: get('pitchProof'),
+      verifiedAt: get('verifiedAt'), verifiedEvidence: get('verifiedEvidence'),
       notes: noteText ? [{ t: Date.now(), text: noteText }] : [], created: Date.now(),
       ...auditFields,
     });
@@ -1646,10 +1699,43 @@ function runImport() {
   saveDB(); closeModal('m-import'); render();
   toast('Imported ' + added + (updated ? ', updated ' + updated : '') + (skipped ? ', skipped ' + skipped : '') + ' leads');
 }
+/* Call-sheet vocabulary → Leadline's own call-result keys. An unknown word is
+   dropped rather than written as a status this app cannot label. */
+const CS_IMPORT = {
+  'answered': 'answered', 'spoke': 'answered', 'interested': 'answered',
+  'interested → spec': 'answered', 'interested -> spec': 'answered', 'spec': 'answered',
+  'voicemail': 'voicemail', 'vm': 'voicemail', 'left message': 'voicemail',
+  'no answer': 'noanswer', 'noanswer': 'noanswer', 'no answer / vm': 'noanswer',
+  'callback': 'callback', 'call back': 'callback', 'call me back': 'callback',
+  'not interested': 'notint', 'notint': 'notint', 'no': 'notint', 'not a fit': 'notint',
+  'junk': 'junk', 'wrong number': 'junk', 'do not call': 'junk',
+  'out of service': 'junk', 'disconnected': 'junk',
+};
+function normCallStatus(raw) {
+  const k = (raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return CS_IMPORT[k] || '';
+}
+function normDate(raw) {
+  raw = (raw || '').trim();
+  if (!raw) return '';
+  const d = Date.parse(raw);
+  return isNaN(d) ? '' : new Date(d).toISOString().slice(0, 10);
+}
+/* "a | b | c" or "a; b; c" → the app's own signal-line bullets */
+function proofList(str) {
+  return String(str || '').split(/\s*[|;]\s*/).map(x => x.trim()).filter(Boolean)
+    .map(x => `<div class="sig-line" style="border-left-color:var(--amber)">${esc(x)}</div>`).join('');
+}
+function copyPitchOpener(id) {
+  const l = db.leads.find(x => x.id === id); if (!l) return;
+  const txt = [l.pitchOpener, l.pitchProof && ('Proof: ' + l.pitchProof)].filter(Boolean).join('\n\n');
+  if (!txt) { toast('No pitch saved on this lead yet.', true); return; }
+  navigator.clipboard?.writeText(txt); toast('Opening line copied');
+}
 function csvEscape(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"'; }
 function exportLeads() {
-  const cols = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'siteScore', 'leadTier', 'leadSignals', 'scoreNotes', 'reviewCount', 'googleRating', 'specUrl', 'pitchedAt', 'callStatus', 'followUp'];
-  const head = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'site_score', 'lead_tier', 'lead_signals', 'score_notes', 'review_count', 'google_rating', 'spec_url', 'pitched_at', 'call_status', 'follow_up'];
+  const cols = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'siteScore', 'leadTier', 'leadSignals', 'scoreNotes', 'reviewCount', 'googleRating', 'specUrl', 'pitchedAt', 'callStatus', 'followUp', 'pitchAngle', 'pitchOpener', 'pitchProof', 'verifiedAt', 'verifiedEvidence'];
+  const head = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'site_score', 'lead_tier', 'lead_signals', 'score_notes', 'review_count', 'google_rating', 'spec_url', 'pitched_at', 'call_status', 'follow_up', 'pitch_angle', 'pitch_opener', 'pitch_proof', 'verified_at', 'verified_evidence'];
   const rows = visibleLeads().map(l => cols.map(c => csvEscape(c === 'pitchedAt' ? (l.pitchedAt ? new Date(l.pitchedAt).toISOString().slice(0, 10) : '') : l[c])).join(','));
   downloadFile('leads-' + todayStr() + '.csv', [head.join(','), ...rows].join('\r\n'), 'text/csv');
   toast('Exported ' + rows.length + ' leads (current filter)');
