@@ -3,6 +3,16 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.18.1 The Call Queue can no longer dead-end. Its default filter matched only HOT and
+          DEAD_SITE, and tier comes from a lead_tier column that a hand-made or older CSV
+          may not have — so a list of 20 uncalled leads with phone numbers sat behind a
+          "Queue clear" card. Now, when the chosen filter matches nothing but uncalled
+          leads exist, the queue shows those leads and says why it widened ("No tier data
+          in this list — showing all 20 uncalled leads instead."). The empty state also
+          reports the real numbers — leads in the list, how many have a phone, how many are
+          uncalled — and names the filter that would show them, instead of the flat
+          reassurance that leads need a phone number. Importing a CSV with no lead_tier
+          mapping now warns at import time rather than silently emptying the queue.
   v1.18.0 Call-sheet pitch fields. A call sheet generated on office2 now imports its
           angle / opener / proof / verified / evidence columns straight into a lead, so the
           words you pitch with live in the CRM instead of a CSV. The opening line shows on
@@ -304,6 +314,7 @@
   .q-company { font: 700 34px/1.1 var(--disp); letter-spacing: .4px; margin-bottom: 4px; }
   .q-sub { color: var(--mut); font-size: 13px; margin-bottom: 16px; }
   .q-phone { display: inline-flex; align-items: center; gap: 10px; font: 700 26px var(--mono); color: var(--amber); margin-bottom: 16px; }
+  .q-note { font: 600 11.5px var(--mono); color: var(--text); background: var(--raise); border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 8px; padding: 9px 12px; margin-bottom: 12px; }
   .q-pitch { background: var(--ink); border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
   .q-angle { font: 700 13px var(--disp); letter-spacing: .3px; margin-bottom: 6px; }
   .q-opener { font-size: 14.5px; line-height: 1.5; color: var(--text); margin-bottom: 8px; }
@@ -657,7 +668,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.18.0';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.18.1';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -1345,16 +1356,28 @@ function setMailHandler(v) { db.settings.mailHandler = v; saveDB(); }
 function pitchMailto() { pitchSend(); }
 
 /* ═══════════ CALL QUEUE ═══════════ */
-let queue = [], queueIdx = 0;
+let queue = [], queueIdx = 0, queueNote = '';
 function buildQueue() {
   const mode = document.getElementById('queue-filter').value;
-  queue = db.leads.filter(l => {
-    const t = tierOf(l);
-    if (mode === 'hot') return ['HOT', 'DEAD_SITE'].includes(t) && !l.callStatus;
-    if (mode === 'callback') return l.callStatus === 'callback';
-    if (mode === 'warm') return t === 'WARM' && !l.callStatus;
-    return !l.callStatus;
-  }).filter(l => l.phone);
+  const base = db.leads.filter(l => l.phone);
+  const pick = m => {
+    if (m === 'hot') return base.filter(l => ['HOT', 'DEAD_SITE'].includes(tierOf(l)) && !l.callStatus);
+    if (m === 'callback') return base.filter(l => l.callStatus === 'callback');
+    if (m === 'warm') return base.filter(l => tierOf(l) === 'WARM' && !l.callStatus);
+    return base.filter(l => !l.callStatus);
+  };
+  queue = pick(mode);
+  queueNote = '';
+  /* A tier-dependent filter must never hide a list of uncalled leads: tier only
+     arrives in the CSV's lead_tier column, and a sheet without it is not empty. */
+  if (!queue.length && (mode === 'hot' || mode === 'warm')) {
+    const all = pick('all');
+    if (all.length) {
+      queue = all;
+      queueNote = (mode === 'warm' ? 'No uncalled WARM leads in this list' : 'No tier data (HOT / DEAD_SITE) in this list')
+        + ' — showing all ' + all.length + ' uncalled leads instead.';
+    }
+  }
   queue.sort((a, b) => tierRank(a) - tierRank(b) || (b.reviewCount || 0) - (a.reviewCount || 0) || (a.siteScore || 0) - (b.siteScore || 0));
   queueIdx = Math.min(queueIdx, Math.max(0, queue.length - 1));
 }
@@ -1362,7 +1385,18 @@ function renderQueue() {
   const wrap = document.getElementById('queue-card');
   document.getElementById('queue-pos').textContent = queue.length ? (queueIdx + 1) + ' / ' + queue.length : '';
   if (!queue.length) {
-    wrap.innerHTML = `<div class="card q-empty"><div style="font-size:34px;margin-bottom:10px">☕</div>Queue clear. Change the filter above, or import more leads.<br><small style="display:block;margin-top:6px">Leads need a phone number to enter the queue.</small></div>`;
+    const withPhone = db.leads.filter(l => l.phone).length;
+    const uncalled = db.leads.filter(l => l.phone && !l.callStatus).length;
+    const tiered = db.leads.filter(l => tierOf(l)).length;
+    let hint;
+    if (!db.leads.length) hint = 'This list is empty — import a call sheet, or switch lists in the top bar.';
+    else if (!withPhone) hint = db.leads.length + ' lead(s) here, none with a phone number — the queue can only call numbers.';
+    else if (uncalled) hint = uncalled + ' uncalled lead(s) with a phone — switch the filter to “Everything uncalled”.';
+    else if (!tiered) hint = 'Every uncalled lead has already been called. ' + db.leads.length + ' lead(s) total.';
+    else hint = 'Every lead with a phone has a call result logged. ' + db.leads.length + ' lead(s) total.';
+    wrap.innerHTML = `<div class="card q-empty"><div style="font-size:34px;margin-bottom:10px">☕</div>Nothing queued for this filter.<br>
+      <small style="display:block;margin-top:6px">${db.leads.length} in “${esc(db.activeList)}” · ${withPhone} with a phone · ${uncalled} uncalled · ${tiered} with a tier</small>
+      <small style="display:block;margin-top:8px;color:var(--text)">${esc(hint)}</small></div>`;
     return;
   }
   const l = queue[queueIdx];
@@ -1370,7 +1404,7 @@ function renderQueue() {
   const sc = l.siteScore || null;
   const scol = sc == null ? 'var(--mut)' : sc >= 70 ? 'var(--mint)' : sc >= 40 ? '#e8d24d' : 'var(--ember)';
   const webHref = l.website ? (/^https?:/.test(l.website) ? l.website : 'https://' + l.website) : '';
-  wrap.innerHTML = `<div class="card" style="padding:26px">
+  wrap.innerHTML = (queueNote ? `<div class="q-note">${esc(queueNote)}</div>` : '') + `<div class="card" style="padding:26px">
     <div class="q-meta"><span>${tierBadge(l)}${l.pitchedAt ? ` <span style="color:var(--sky);font:600 11px var(--mono)">📨 PITCHED ${fmtPitched(l.pitchedAt).toUpperCase()}</span>` : ''}</span><span>${esc(l.city) || ''}${l.source ? ' · ' + esc(l.source) : ''}</span></div>
     <div class="q-company">${esc(l.company)}</div>
     <div class="q-sub">${esc(l.contact) || 'No contact name'}${webHref ? ` · <a href="${esc(webHref)}" target="_blank" rel="noopener noreferrer">${esc(l.website.replace(/^https?:\/\//, ''))}</a>` : ''}</div>
@@ -1695,9 +1729,11 @@ function runImport() {
     });
     added++;
   });
-  addLog('Imported <b>' + added + '</b> leads' + (updated ? ', updated ' + updated : ''));
+  addLog('Imported <b>' + added + '</b> leads' + (updated ? ', updated ' + updated : '')
+    + (!map['leadTier'] && (added || updated) ? ' — no lead_tier column mapped, so the Hot queue filter will not match them' : ''));
   saveDB(); closeModal('m-import'); render();
   toast('Imported ' + added + (updated ? ', updated ' + updated : '') + (skipped ? ', skipped ' + skipped : '') + ' leads');
+  if (!map['leadTier'] && (added || updated)) toast('No lead_tier column mapped — the Hot queue will fall back to showing all uncalled leads.', true);
 }
 /* Call-sheet vocabulary → Leadline's own call-result keys. An unknown word is
    dropped rather than written as a status this app cannot label. */
