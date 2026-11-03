@@ -3,6 +3,10 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.18.2 Bigger phone button in the lead drawer: 20px bold mono amber instead of sharing the
+          same 11.5px as every other action, because the number you are about to dial is the
+          whole point of opening the panel. Button grows to 38px tall, stays in the same action
+          row, and the drawer still fits 400px with no overflow. Nothing else changed.
   v1.18.1 The Call Queue can no longer dead-end. Its default filter matched only HOT and
           DEAD_SITE, and tier comes from a lead_tier column that a hand-made or older CSV
           may not have — so a list of 20 uncalled leads with phone numbers sat behind a
@@ -180,6 +184,9 @@
   .btn-danger { background: transparent; border-color: #5c2a20; color: var(--ember); }
   .btn-danger:hover { background: rgba(255,107,74,.1); border-color: var(--ember); }
   .btn-sm { padding: 4px 9px; font-size: 11.5px; border-radius: 6px; }
+  /* The number you're about to dial is the point of the panel — give it real size */
+  .btn-phone { font: 700 20px var(--mono); color: var(--amber); border-color: var(--amber); padding: 6px 13px; letter-spacing: .4px; }
+  .btn-phone:hover { background: rgba(255,183,61,.1); border-color: var(--amber); }
   .chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
   .chip { padding: 5px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; font-weight: 600; cursor: pointer; color: var(--mut); }
   .chip:hover { color: var(--text); border-color: var(--mut); }
@@ -1113,7 +1120,7 @@ function openDrawer(id) {
   document.getElementById('d-body').innerHTML = `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <span class="badge b-${l.status}">${l.status}</span>${tierBadge(l)}
-      ${l.phone ? `<a class="btn btn-sm" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>` : ''}
+      ${l.phone ? `<a class="btn btn-sm btn-phone" href="tel:${esc(l.phone)}">📞 ${esc(l.phone)}</a>` : ''}
       ${webHref ? `<a class="btn btn-sm" href="${esc(webHref)}" target="_blank" rel="noopener noreferrer">🌐 Site</a>` : ''}
       ${l.specUrl ? `<a class="btn btn-sm" href="${esc(/^https?:\/\//i.test(l.specUrl) ? l.specUrl : 'https://' + l.specUrl)}" target="_blank" rel="noopener noreferrer">🐸 Spec site</a>` : ''}
       <button class="btn btn-sm" onclick="googleLead('${l.id}')">🔍 Google</button>
