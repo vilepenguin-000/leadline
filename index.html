@@ -3,6 +3,15 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.18.3 The day boundary is local now, not UTC. "Calls today" read the UTC date, and in
+          Toronto that date flips at 7 PM — so a call logged in the evening was filed under
+          tomorrow's day, and the next morning the counter already showed last night's calls
+          instead of starting at zero. "Today" is now the local calendar day everywhere it is
+          used: the calls-today counter and the 7-day stat, the follow-up due and overdue
+          comparisons, the date pre-filled when you schedule a new follow-up, the callback
+          date set from the Call Queue (which was landing two days out after 7 PM), and the
+          pitched date in the CSV export. Per-day counters already written in the evening keep
+          the day they were filed under — nothing is deleted, so no call history is lost.
   v1.18.2 Bigger phone button in the lead drawer: 20px bold mono amber instead of sharing the
           same 11.5px as every other action, because the number you are about to dial is the
           whole point of opening the panel. Button grows to 38px tall, stays in the same action
@@ -675,7 +684,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.18.2';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.18.3';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -812,7 +821,15 @@ function bulkMoveList() {
   toast('Moved ' + moving.length + ' lead' + (moving.length === 1 ? '' : 's') + ' to "' + target + '"');
 }
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
-const todayStr = () => new Date().toISOString().slice(0, 10);
+/* Local calendar day, YYYY-MM-DD. Deliberately NOT toISOString(): that returns the
+   UTC day, so in Toronto (UTC-5) the day flips at 19:00 and every evening call was
+   filed under tomorrow's date — which is why "calls today" looked like it never
+   rolled over on a new day. */
+const dayKey = d => {
+  const x = d == null ? new Date() : new Date(d);
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+};
+const todayStr = () => dayKey();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt$ = n => '$' + (Number(n) || 0).toLocaleString();
 
@@ -942,7 +959,7 @@ function renderDashboard() {
   document.getElementById('st-leads-sub').textContent = (cities.size ? `across ${cities.size} cities` : 'import a CSV to get started') + (pitched ? ` · 📨 ${pitched} pitched` : '');
   document.getElementById('st-hot').textContent = hotQueueSize();
   document.getElementById('st-calls').textContent = callsToday();
-  const week = Object.entries(db.stats).filter(([k]) => (Date.now() - new Date(k)) < 7 * 864e5).reduce((s, [, v]) => s + v, 0);
+  const week = Object.entries(db.stats).filter(([k]) => (Date.now() - new Date(k + 'T00:00:00')) < 7 * 864e5).reduce((s, [, v]) => s + v, 0);
   document.getElementById('st-calls-sub').textContent = week + ' in the last 7 days';
   const open = db.deals.filter(d => !['won', 'lost'].includes(d.stage));
   document.getElementById('st-pipe').textContent = fmt$(open.reduce((s, d) => s + (Number(d.value) || 0), 0));
@@ -1442,7 +1459,7 @@ function queueOutcome(cs) {
   setCallStatus(l.id, cs, false);
   if (cs === 'callback') {
     const d = new Date(Date.now() + 86400000);
-    l.followUp = l.followUp || d.toISOString().slice(0, 10);
+    l.followUp = l.followUp || dayKey(d);
     saveDB();
   }
   buildQueue(); renderQueue();
@@ -1779,7 +1796,7 @@ function csvEscape(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"'; 
 function exportLeads() {
   const cols = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'siteScore', 'leadTier', 'leadSignals', 'scoreNotes', 'reviewCount', 'googleRating', 'specUrl', 'pitchedAt', 'callStatus', 'followUp', 'pitchAngle', 'pitchOpener', 'pitchProof', 'verifiedAt', 'verifiedEvidence'];
   const head = ['company', 'contact', 'email', 'phone', 'website', 'address', 'city', 'status', 'source', 'site_score', 'lead_tier', 'lead_signals', 'score_notes', 'review_count', 'google_rating', 'spec_url', 'pitched_at', 'call_status', 'follow_up', 'pitch_angle', 'pitch_opener', 'pitch_proof', 'verified_at', 'verified_evidence'];
-  const rows = visibleLeads().map(l => cols.map(c => csvEscape(c === 'pitchedAt' ? (l.pitchedAt ? new Date(l.pitchedAt).toISOString().slice(0, 10) : '') : l[c])).join(','));
+  const rows = visibleLeads().map(l => cols.map(c => csvEscape(c === 'pitchedAt' ? (l.pitchedAt ? dayKey(l.pitchedAt) : '') : l[c])).join(','));
   downloadFile('leads-' + todayStr() + '.csv', [head.join(','), ...rows].join('\r\n'), 'text/csv');
   toast('Exported ' + rows.length + ' leads (current filter)');
 }
