@@ -3,6 +3,12 @@
   LEADLINE — web-dev lead CRM
   ════════════════════════════
   CHANGELOG
+  v1.18.4 Leads are numbered. A narrow gutter column on the far left counts the rows you are
+          looking at, starting at 1, so a list can be discussed out loud — "number seven" beats
+          "the one under Rod's Auto". The number is the position in the CURRENT view, so it
+          renumbers when you filter or sort, and always matches what you see on screen. Muted
+          and tabular so 9 and 10 line up, and it reads as a gutter rather than as data. Table
+          grows 46px wider to pay for it; the company column keeps its ellipsis behaviour.
   v1.18.3 The day boundary is local now, not UTC. "Calls today" read the UTC date, and in
           Toronto that date flips at 7 PM — so a call logged in the evening was filed under
           tomorrow's day, and the next morning the counter already showed last night's calls
@@ -242,9 +248,16 @@
   td { padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   td > div { overflow: hidden; text-overflow: ellipsis; }
   .sub { font-size: 11px; color: var(--mut); margin-top: 1px; }
-  #leads-table { table-layout: fixed; min-width: 854px; }
+  #leads-table { table-layout: fixed; min-width: 900px; }
   #leads-table td, #leads-table th { padding-left: 8px; padding-right: 8px; }
-  #leads-table td:nth-child(2) { max-width: 0; }
+  #leads-table td:nth-child(3) { max-width: 0; }
+  /* Row number: right-aligned, tabular so 9 and 10 line up, muted so it reads as
+     a gutter rather than data. */
+  #leads-table th.rownum, #leads-table td.rownum {
+    width: 46px; text-align: right; font-family: var(--mono); font-size: 11px;
+    color: var(--mut); font-variant-numeric: tabular-nums; letter-spacing: 0;
+    text-transform: none; padding-right: 10px;
+  }
   tbody tr { cursor: pointer; } tbody tr:hover td { background: var(--raise); }
   tbody tr.selected td { background: rgba(255,178,36,.07); }
   /* ── Call-result row tint: one glance shows who has been called ──
@@ -493,6 +506,7 @@
       <div class="table-wrap" style="max-height:calc(100vh - 250px)">
         <table id="leads-table">
           <thead><tr>
+            <th class="rownum" title="Row number in the current filter">#</th>
             <th style="width:34px"><input type="checkbox" id="sel-all" onclick="toggleAll(this)"></th>
             <th data-sort="company" style="min-width:190px">Company / contact<span class="rs">│</span></th>
             <th data-sort="status" style="width:104px">Status<span class="rs">│</span></th>
@@ -684,7 +698,7 @@
 <div id="toasts"></div>
 <script>
 /* ═══════════ VERSION ═══════════ */
-const APP_VERSION = '1.18.3';   // bump on every change — history in the comment at the top of this file
+const APP_VERSION = '1.18.4';   // bump on every change — history in the comment at the top of this file
 
 /* ═══════════ STATE & STORAGE ═══════════ */
 const DB_KEY = 'leadline_db_v1';
@@ -1062,15 +1076,16 @@ function renderLeads() {
   document.getElementById('leads-count').textContent = rows.length + ' of ' + db.leads.length;
   const tb = document.getElementById('leads-tbody');
   if (!rows.length) {
-    tb.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="e-big">📭</div>No leads match. ${db.leads.length ? 'Adjust the filters above.' : 'Import a CSV or add a lead to begin.'}</div></td></tr>`;
+    tb.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="e-big">📭</div>No leads match. ${db.leads.length ? 'Adjust the filters above.' : 'Import a CSV or add a lead to begin.'}</div></td></tr>`;
   } else {
-    tb.innerHTML = rows.map(l => {
+    tb.innerHTML = rows.map((l, i) => {
       const sc = l.siteScore || null;
       const scol = sc == null ? '' : sc >= 70 ? 'var(--mint)' : sc >= 40 ? '#e8d24d' : 'var(--ember)';
       const overdue = l.followUp && l.followUp < todayStr();
       const webHref = l.website ? (/^https?:/.test(l.website) ? l.website : 'https://' + l.website) : '';
       const csCls = l.callStatus ? ' called st-' + l.callStatus : '';
       return `<tr class="${selected.has(l.id) ? 'selected' : ''}${csCls}" onclick="if(!event.target.closest('input,button,a,select'))openDrawer('${l.id}')">
+        <td class="rownum">${i + 1}</td>
         <td><input type="checkbox" ${selected.has(l.id) ? 'checked' : ''} onclick="toggleSel('${l.id}',this)"></td>
         <td><div style="font-weight:600">${esc(l.company) || '—'}${webHref ? ` <a href="${esc(webHref)}" target="_blank" rel="noopener noreferrer" title="${esc(l.website)}" onclick="event.stopPropagation()">🌐</a>` : ''}</div>${l.contact ? `<div class="sub">${esc(l.contact)}</div>` : ''}</td>
         <td><select class="badge b-${l.status} status-sel" aria-label="Status for ${esc(l.company)}" title="Change status" onclick="event.stopPropagation()" onchange="setStatus('${l.id}', this.value, false)">${STATUSES.map(([k, lbl]) => `<option value="${k}"${(l.status || 'lead') === k ? ' selected' : ''}>${lbl}</option>`).join('')}</select></td>
